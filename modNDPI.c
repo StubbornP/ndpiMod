@@ -33,6 +33,113 @@ u_int32_t current_ndpi_memory = 0, max_ndpi_memory = 0,link_type;
 static  struct ndpi_workflow_prefs prefs;
 static  struct context main_context;
 
+static int lua_table_set_integer( lua_State *L, const char *key, lua_Integer value){
+
+    lua_pushstring( L, key);
+    lua_pushinteger( L, value);
+    lua_settable( L, -3);
+
+    return 0;
+}
+
+static int lua_table_set_string( lua_State *L, const char *key, const char *value){
+
+    lua_pushstring( L, key);
+    lua_pushstring( L, value);
+    lua_settable( L, -3);
+
+    return 0;
+}
+
+static char* ipProto2Name(u_int16_t proto_id) {
+
+    static char proto[8];
+
+    switch(proto_id) {
+        case IPPROTO_TCP:
+            return("TCP");
+            break;
+        case IPPROTO_UDP:
+            return("UDP");
+            break;
+        case IPPROTO_ICMP:
+            return("ICMP");
+            break;
+        case IPPROTO_ICMPV6:
+            return("ICMPV6");
+            break;
+        case 112:
+            return("VRRP");
+            break;
+        case IPPROTO_IGMP:
+            return("IGMP");
+            break;
+    }
+
+    snprintf(proto, sizeof(proto), "%u", proto_id);
+    return(proto);
+}
+
+static int dump_flow( struct ndpi_flow_info *flow ){
+
+    char tmp[256];
+
+    if( NULL == current_Machine ){
+        printf("BUG: NDPI MOD INVOKED WITH current_Machine NOT SET!!!");
+        return -1;
+    }
+
+    lua_table_set_string( current_Machine,"protocol", ipProto2Name(flow->protocol));
+
+    lua_table_set_string( current_Machine,"host_a.name", flow->lower_name);
+    lua_table_set_string( current_Machine,"host_b.name", flow->upper_name);
+
+    lua_table_set_integer( current_Machine,"host_a.port", flow->lower_port);
+    lua_table_set_integer( current_Machine,"host_b.port", flow->upper_port);
+
+    lua_table_set_string( current_Machine,"protocol", ipProto2Name(flow->protocol));
+    lua_table_set_string( current_Machine,"protocol", ipProto2Name(flow->protocol));
+    lua_table_set_string( current_Machine,"protocol", ipProto2Name(flow->protocol));
+    lua_table_set_string( current_Machine,"protocol", ipProto2Name(flow->protocol));
+    lua_table_set_string( current_Machine,"protocol", ipProto2Name(flow->protocol));
+
+
+    if(flow->detected_protocol.master_protocol)
+        lua_table_set_integer( current_Machine,"detected.master_protocol", flow->detected_protocol.master_protocol);
+    lua_table_set_integer( current_Machine,"detected.app_protocol", flow->detected_protocol.app_protocol);
+
+    if(flow->detected_protocol.master_protocol) {
+
+        snprintf(tmp, sizeof(tmp), "%s.%s",
+                 ndpi_get_proto_name(main_context.workflow->ndpi_struct, flow->detected_protocol.master_protocol),
+                 ndpi_get_proto_name(main_context.workflow->ndpi_struct, flow->detected_protocol.app_protocol));
+
+        lua_table_set_string( current_Machine,"detected.protocol.name", tmp);
+    } else{
+
+        snprintf(tmp, sizeof(tmp), "NULL.%s",
+                 ndpi_get_proto_name(main_context.workflow->ndpi_struct, flow->detected_protocol.app_protocol));
+
+        lua_table_set_string( current_Machine,"detected.protocol.name", tmp);
+    }
+
+    lua_table_set_integer( current_Machine,"packets", flow->packets);
+    lua_table_set_integer( current_Machine,"bytes", flow->bytes);
+
+
+    if(flow->host_server_name[0] != '\0')
+        lua_table_set_string( current_Machine,"host.server.name", flow->host_server_name);
+
+    if((flow->ssh_ssl.client_info[0] != '\0') || (flow->ssh_ssl.server_info[0] != '\0')) {
+
+        if(flow->ssh_ssl.client_info[0] != '\0')
+            lua_table_set_string( current_Machine,"ssl.client", flow->ssh_ssl.client_info);
+
+        if(flow->ssh_ssl.server_info[0] != '\0')
+            lua_table_set_string( current_Machine,"ssl.server", flow->ssh_ssl.server_info);
+    }
+}
+
 static u_int16_t node_guess_undetected_protocol(struct ndpi_flow_info *flow) {
 
     flow->detected_protocol = ndpi_guess_undetected_protocol(main_context.workflow->ndpi_struct,
@@ -41,7 +148,7 @@ static u_int16_t node_guess_undetected_protocol(struct ndpi_flow_info *flow) {
                                                              ntohs(flow->lower_port),
                                                              ntohl(flow->upper_ip),
                                                              ntohs(flow->upper_port));
-    printf("Guess state: %u\n", flow->detected_protocol.app_protocol);
+    //printf("Guess state: %u\n", flow->detected_protocol.app_protocol);
     if(flow->detected_protocol.app_protocol != NDPI_PROTOCOL_UNKNOWN)
         main_context.workflow->stats.guessed_flow_protocols++;
 
@@ -59,9 +166,9 @@ static void node_proto_guess_walker(const void *node, ndpi_VISIT which, int dept
         if(PROTO_GUESS) {
             if(flow->detected_protocol.app_protocol == NDPI_PROTOCOL_UNKNOWN) {
                 node_guess_undetected_protocol(flow);
-                // printFlow(thread_id, flow);
-                printf("Flow detected run into function(%s):%s\n",__func__,
-                       ndpi_get_proto_name(main_context.workflow->ndpi_struct,flow->detected_protocol.app_protocol));
+                dump_flow(flow);
+//                printf("Flow detected run into function(%s):%s\n",__func__,
+//                       ndpi_get_proto_name(main_context.workflow->ndpi_struct,flow->detected_protocol.app_protocol));
             }
         }
 
@@ -110,8 +217,9 @@ static void on_protocol_discovered_callback(struct ndpi_workflow * workflow,
 
 //        printFlow(thread_id, flow);
     }
-    printf("Flow detected run into function(%s):%s \n",__func__,
-           ndpi_get_proto_name(main_context.workflow->ndpi_struct,flow->detected_protocol.app_protocol));
+    dump_flow(flow);
+//    printf("Flow detected run into function(%s):%s \n",__func__,
+//           ndpi_get_proto_name(main_context.workflow->ndpi_struct,flow->detected_protocol.app_protocol));
 }
 
 void init_workflow(){
@@ -169,7 +277,7 @@ static void packet_callback(u_char *args, const struct pcap_pkthdr *header,
         // free all the flows
         while (main_context.num_idle_flows > 0) {
 
-            printf("Here we run into Flow GC with idel flow = %d, idex_scan_index = %d"
+            //printf("Here we run into Flow GC with idel flow = %d, idex_scan_index = %d"
                     ,main_context.num_idle_flows
                     ,main_context.idle_scan_idx);
 
@@ -230,19 +338,11 @@ int process( lua_State *L){
     return 1;
 }
 
-luaL_Reg functionTable[] = {
-
-        { "modNDPIInit", init},
-        { "modNDPIProcess", process},
-};
 
 int luaopen_modNDPI( lua_State *L ){
 
-    printf("call1");
+    lua_register( L,"modNDPIInit", init );
+    lua_register( L,"modNDPIProcess", process );
 
-    lua_newtable( L );
-    printf("call2");
-    luaL_setfuncs( L, functionTable, 0);
-    printf("call3");
-    return 1;
+    return 0;
 }
